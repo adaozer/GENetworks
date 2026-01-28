@@ -18,8 +18,10 @@
     <ClCompile Include="server.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="client.cpp">
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="server.h">
       <Filter>Source Files</Filter>
-    </ClCompile>
+    </ClInclude>
   </ItemGroup>
 </Project>
