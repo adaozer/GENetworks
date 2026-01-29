@@ -4,7 +4,8 @@
 #include <thread>
 #include <unordered_map>
 #include <string>
+#include <iostream>
+#include <mutex>
 
-std::unordered_map<std::string, sockaddr*> clients;
-int main();
-void clientAdd(sockaddr*);
+std::unordered_map<std::string, SOCKET> clients;
+std::mutex mx;
