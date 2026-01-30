@@ -1,43 +1,190 @@
 #include "server.h"
-#include "client.h"
 
-void broadcast(int received, const char* recvbuff, SOCKET sender) {
-	std::vector<SOCKET> current_sockets;
+bool sendAll(SOCKET s, const char* data, int len) {
+	int sentSum = 0;
+	while (sentSum < len) {
+		int sent = send(s, data + sentSum, len - sentSum, 0);
+		if (sent == SOCKET_ERROR) return false;
+		sentSum += sent;
+	}
+	return true;
+}
+
+bool sendLine(SOCKET s, const std::string& line) {
+	std::string out = line;
+	if (out.empty() || out.back() != '\n') out.push_back('\n');
+	return sendAll(s, out.c_str(), out.size());
+}
+
+std::string removeClient(SOCKET s) {
+	std::string username;
 	{
 		std::lock_guard<std::mutex> lock(mx);
+		auto it = clientSockets.find(s);
+		if (it != clientSockets.end()) {
+			username = it->second;
+			clients.erase(username);
+			clientSockets.erase(it);
+		}
+		recvBuffers.erase(s);
+	}
+	closesocket(s);
+	return username;
+}
+
+void broadcast(const std::string& line, SOCKET sender = INVALID_SOCKET) {
+	std::vector<SOCKET> sockets;
+	{
+		std::lock_guard<std::mutex> lock(mx);
+		sockets.reserve(clients.size());
 		for (auto& c : clients) {
-			if (c.second != sender) {
-				current_sockets.push_back(c.second);
-			}
+			if (c.second != sender) sockets.push_back(c.second);
 		}
 	}
-	for (SOCKET s : current_sockets) {
-		send(s, recvbuff, received, 0);
+
+	std::vector<std::string> leavers;
+	for (SOCKET s : sockets) {
+		if (!sendLine(s, line)) {
+			std::string u = removeClient(s);
+			if (!u.empty()) leavers.push_back(u);
+		}
 	}
+
+	if (leavers.empty()) return;
+
+	std::vector<SOCKET> remaining;
+	{
+		std::lock_guard<std::mutex> lock(mx);
+		remaining.reserve(clients.size());
+		for (auto& c : clients) remaining.push_back(c.second);
+	}
+
+	for (const auto& u : leavers) {
+		for (SOCKET s : remaining) {
+			sendLine(s, u + " has left!");
+		}
+	}
+}
+
+std::string clientList() {
+	std::lock_guard<std::mutex> lock(mx);
+	std::string output = "Online: ";
+	bool first = true;
+	for (auto& client : clients) {
+		output += (first ? " " : ", ");
+		output += client.first;
+		first = false;
+	}
+	return output;
+}
+
+bool readText(SOCKET s) {
+	char buff[1024];
+	int received = recv(s, buff, sizeof(buff), 0);
+	if (received <= 0) return false;
+	{
+		std::lock_guard<std::mutex> lock(mx);
+		recvBuffers[s].append(buff, buff + received);
+	}
+	return true;
+}
+
+static std::string stripCR(std::string s) {
+	s.erase(std::remove(s.begin(), s.end(), '\r'), s.end());
+	return s;
+}
+
+bool completeLine(SOCKET s, std::string& output) {
+	std::lock_guard<std::mutex> lock(mx);
+	auto it = recvBuffers.find(s);
+	if (it == recvBuffers.end()) return false;
+
+	std::string& buf = it->second;
+	size_t pos = buf.find('\n');
+	if (pos == std::string::npos) return false;
+
+	output = buf.substr(0, pos);
+	buf.erase(0, pos + 1);
+	output = stripCR(output);
+	return true;
 }
 
 void clientAdd(SOCKET client_socket) {
-	std::string key = std::to_string((uintptr_t)client_socket);
 	{
 		std::lock_guard<std::mutex> lock(mx);
-		clients[key] = client_socket;
+		recvBuffers[client_socket] = "";
 	}
-	char recvbuff[1024];
-	while (1) {
-		int received = recv(client_socket, recvbuff, sizeof(recvbuff), 0);
-		if (received > 0) {
-			broadcast(received, recvbuff, client_socket);
+
+	std::string username;
+	while (username.empty()) {
+		std::string line;
+
+		while (!completeLine(client_socket, line)) {
+			if (!readText(client_socket)) {
+				removeClient(client_socket); 
+				return;
+			}
 		}
-		else {
-			break;
+
+		username = line;
+
+		// validate username
+		if (username.empty() || username.size() > 24) {
+			sendLine(client_socket, "ERR invalid username (1-24 chars).");
+			{
+				std::lock_guard<std::mutex> lock(mx);
+				recvBuffers.erase(client_socket);
+			}
+			closesocket(client_socket);
+			return;
 		}
+
+		// must be unique
+		{
+			std::lock_guard<std::mutex> lock(mx);
+			if (clients.find(username) != clients.end()) {
+				sendLine(client_socket, "ERR username taken.");
+				recvBuffers.erase(client_socket);
+				closesocket(client_socket);
+				return;
+			}
+			clients[username] = client_socket;
+			clientSockets[client_socket] = username;
+		}
+
 	}
-	{
-		std::lock_guard<std::mutex> lock(mx);
-		clients.erase(key);
+
+	sendLine(client_socket, "Welcome " + username + "!");
+	broadcast(username + " has joined!", client_socket);
+
+	while (true) {
+		std::string line;
+
+		while (!completeLine(client_socket, line)) {
+			if (!readText(client_socket)) {
+				std::string u = removeClient(client_socket);
+				if (!u.empty()) broadcast(u + " has left!");
+				return;
+			}
+		}
+
+		if (line.empty()) continue;
+
+		if (line == "/leave") {
+			std::string u = removeClient(client_socket);
+			if (!u.empty()) broadcast(u + " has left!");
+			return;
+		}
+
+		if (line == "/who") {
+			sendLine(client_socket, clientList());
+			continue;
+		}
+		broadcast(username + ": " + line, client_socket);
 	}
-	closesocket(client_socket);
 }
+
+
 
 int main() {
 	WSADATA wsaData;

@@ -12,4 +12,5 @@
 
 std::unordered_map<std::string, SOCKET> clients;
 std::unordered_map<SOCKET, std::string> clientSockets;
+std::unordered_map<SOCKET, std::string> recvBuffers;
 std::mutex mx;
