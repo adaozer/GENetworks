@@ -1,23 +1,43 @@
 #include "server.h"
 #include "client.h"
 
-
-
-void clientAdd(SOCKET client_socket) {
-	std::string username;
-	std::string message;
+void broadcast(int received, const char* recvbuff, SOCKET sender) {
+	std::vector<SOCKET> current_sockets;
 	{
 		std::lock_guard<std::mutex> lock(mx);
-		std::string key = std::to_string((uintptr_t)client_socket);
-		clients[username] = client_socket;
+		for (auto& c : clients) {
+			if (c.second != sender) {
+				current_sockets.push_back(c.second);
+			}
+		}
 	}
-	while (1) {
-		//send receive
+	for (SOCKET s : current_sockets) {
+		send(s, recvbuff, received, 0);
 	}
-
-	closesocket(client_socket);
 }
 
+void clientAdd(SOCKET client_socket) {
+	std::string key = std::to_string((uintptr_t)client_socket);
+	{
+		std::lock_guard<std::mutex> lock(mx);
+		clients[key] = client_socket;
+	}
+	char recvbuff[1024];
+	while (1) {
+		int received = recv(client_socket, recvbuff, sizeof(recvbuff), 0);
+		if (received > 0) {
+			broadcast(received, recvbuff, client_socket);
+		}
+		else {
+			break;
+		}
+	}
+	{
+		std::lock_guard<std::mutex> lock(mx);
+		clients.erase(key);
+	}
+	closesocket(client_socket);
+}
 
 int main() {
 	WSADATA wsaData;
