@@ -7,6 +7,7 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <sstream>
 
 #pragma comment(lib, "Ws2_32.lib")
 

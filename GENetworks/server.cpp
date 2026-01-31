@@ -121,7 +121,7 @@ void clientAdd(SOCKET client_socket) {
 
 		while (!completeLine(client_socket, line)) {
 			if (!readText(client_socket)) {
-				removeClient(client_socket); 
+				removeClient(client_socket);
 				return;
 			}
 		}
@@ -159,7 +159,6 @@ void clientAdd(SOCKET client_socket) {
 
 	while (true) {
 		std::string line;
-
 		while (!completeLine(client_socket, line)) {
 			if (!readText(client_socket)) {
 				std::string u = removeClient(client_socket);
@@ -167,7 +166,6 @@ void clientAdd(SOCKET client_socket) {
 				return;
 			}
 		}
-
 		if (line.empty()) continue;
 
 		if (line == "/leave") {
@@ -180,10 +178,35 @@ void clientAdd(SOCKET client_socket) {
 			sendLine(client_socket, clientList());
 			continue;
 		}
+		if (line.rfind("/msg ", 0) == 0) {
+			std::istringstream iss(line);
+			std::string cmd, target;
+			iss >> cmd >> target;
+			std::string message;
+			std::getline(iss, message);
+			if (!message.empty() && message[0] == ' ')
+				message.erase(0, 1);
+			if (target.empty() || message.empty()) {
+				sendLine(client_socket, "ERR usage: /msg <user> <text>");
+				continue;
+			}
+			SOCKET receiver_socket = INVALID_SOCKET;
+			{
+				std::lock_guard<std::mutex> lock(mx);
+				auto it = clients.find(target);
+				if (it != clients.end()) receiver_socket = it->second;
+			}
+			if (receiver_socket == INVALID_SOCKET) {
+				sendLine(client_socket, "ERR user not found: " + target);
+				continue;
+			}
+			sendLine(receiver_socket, "(DM) " + username + ": " + message);
+			sendLine(client_socket, "(DM to " + target + ") " + message);
+			continue;
+		}
 		broadcast(username + ": " + line, client_socket);
 	}
 }
-
 
 
 int main() {
