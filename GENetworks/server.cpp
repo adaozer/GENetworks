@@ -128,7 +128,6 @@ void clientAdd(SOCKET client_socket) {
 
 		username = line;
 
-		// validate username
 		if (username.empty() || username.size() > 24) {
 			sendLine(client_socket, "ERR invalid username (1-24 chars).");
 			{
@@ -139,7 +138,6 @@ void clientAdd(SOCKET client_socket) {
 			return;
 		}
 
-		// must be unique
 		{
 			std::lock_guard<std::mutex> lock(mx);
 			if (clients.find(username) != clients.end()) {
@@ -190,6 +188,10 @@ void clientAdd(SOCKET client_socket) {
 				sendLine(client_socket, "ERR usage: /msg <user> <text>");
 				continue;
 			}
+			if (target == username) {
+				sendLine(client_socket, "ERR you cannot DM yourself.");
+				continue;
+			}
 			SOCKET receiver_socket = INVALID_SOCKET;
 			{
 				std::lock_guard<std::mutex> lock(mx);
@@ -213,7 +215,6 @@ int main() {
 	WSADATA wsaData;
 	int iResult;
 
-	// Initialize Winsock
 	if (WSAStartup(MAKEWORD(2, 2), &wsaData)!= 0) {
 		std::cerr << "WSAStartup failed: \n" << WSAGetLastError() << std::endl;
 		return 1;
@@ -253,8 +254,6 @@ int main() {
 			std::cerr << "accept failed: " << WSAGetLastError() << std::endl;
 			continue;
 		}
-		//char client_ip[INET_ADDRSTRLEN];
-		//inet_ntop(AF_INET, &client_address.sin_addr, client_ip, INET_ADDRSTRLEN);
 		std::thread t(clientAdd, client_socket);
 		t.detach();
 	}

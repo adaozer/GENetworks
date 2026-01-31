@@ -1,9 +1,5 @@
-// clients.cpp
-// Simple TCP chat client for your line-based C++ server (Winsock).
-// Usage: clients.exe <username> <host> <port>
-// Example: clients.exe bob 127.0.0.1 65432
-
 #include "client.h"
+
 static bool sendAll(SOCKET s, const char* data, int len) {
     int sentSum = 0;
     while (sentSum < len) {
@@ -25,26 +21,20 @@ static std::string stripCR(std::string s) {
     return s;
 }
 
-static std::mutex coutMx;
-
-// Receives bytes, prints complete newline-delimited messages.
-// Keeps partial data in a buffer until '\n' arrives.
 static void recvLoop(SOCKET s, std::atomic<bool>& running) {
     std::string buf;
-    buf.reserve(4096);
-
-    char tmp[2048];
+    char buff[1048];
 
     while (running.load()) {
-        int received = recv(s, tmp, (int)sizeof(tmp), 0);
+        int received = recv(s, buff, sizeof(buff), 0);
         if (received <= 0) {
             running.store(false);
             break;
         }
 
-        buf.append(tmp, tmp + received);
+        buf.append(buff, buff + received);
 
-        for (;;) {
+        while(1) {
             size_t pos = buf.find('\n');
             if (pos == std::string::npos) break;
 
@@ -53,21 +43,20 @@ static void recvLoop(SOCKET s, std::atomic<bool>& running) {
 
             line = stripCR(line);
 
-            std::lock_guard<std::mutex> lock(coutMx);
+            std::lock_guard<std::mutex> lock(mx);
             std::cout << line << "\n";
         }
     }
 
-    // Flush any trailing bytes (optional)
     if (!buf.empty()) {
-        std::lock_guard<std::mutex> lock(coutMx);
+        std::lock_guard<std::mutex> lock(mx);
         std::cout << stripCR(buf) << "\n";
     }
 }
 
 static bool connectTo(const std::string& host, const std::string& portStr, SOCKET& outSock) {
     addrinfo hints{};
-    hints.ai_family = AF_UNSPEC;     // IPv4 or IPv6
+    hints.ai_family = AF_UNSPEC;   
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
 
@@ -106,46 +95,40 @@ static bool connectTo(const std::string& host, const std::string& portStr, SOCKE
 
 int main(int argc, char** argv) {
     if (argc != 4) {
-        std::cerr << "Usage: " << argv[0] << " <username> <host> <port>\n";
+        std::cerr << "Usage: " << argv[0] << " <username> <host> <port>" << std::endl;
         return 1;
     }
 
     const std::string username = argv[1];
     const std::string host = argv[2];
-    const std::string portStr = argv[3];
+    const std::string port = argv[3];
 
     WSADATA wsa{};
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-        std::cerr << "WSAStartup failed: " << WSAGetLastError() << "\n";
+        std::cerr << "WSAStartup failed: " << WSAGetLastError() << std::endl;
         return 1;
     }
 
-    SOCKET sock = INVALID_SOCKET;
-    if (!connectTo(host, portStr, sock)) {
+    SOCKET client_socket = INVALID_SOCKET;
+    if (!connectTo(host, port, client_socket)) {
         WSACleanup();
         return 1;
     }
-
-    // Send username as the first line (server expects newline framing).
-    if (!sendLine(sock, username)) {
-        std::cerr << "Failed to send username.\n";
-        closesocket(sock);
+    if (!sendLine(client_socket, username)) {
+        std::cerr << "Failed to send username." << std::endl;
+        closesocket(client_socket);
         WSACleanup();
         return 1;
     }
 
     std::atomic<bool> running(true);
 
-    // Start receiver thread.
-    std::thread rx(recvLoop, sock, std::ref(running));
-
-    // Main loop: read stdin, send lines.
-    // Commands supported by your server: /leave, /who, /msg <user> <text>
+    std::thread t(recvLoop, client_socket, std::ref(running));
     std::string line;
     while (running.load() && std::getline(std::cin, line)) {
-        if (!sendLine(sock, line)) {
-            std::lock_guard<std::mutex> lock(coutMx);
-            std::cerr << "Send failed (server likely closed).\n";
+        if (!sendLine(client_socket, line)) {
+            std::lock_guard<std::mutex> lock(mx);
+            std::cerr << "Send failed (server likely closed)." << std::endl;
             running.store(false);
             break;
         }
@@ -156,14 +139,12 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Graceful shutdown.
-    // shutdown() helps unblock recv() on some stacks.
-    shutdown(sock, SD_BOTH);
-    closesocket(sock);
+    shutdown(client_socket, SD_BOTH);
+    closesocket(client_socket);
 
     running.store(false);
 
-    if (rx.joinable()) rx.join();
+    t.join();
 
     WSACleanup();
     return 0;

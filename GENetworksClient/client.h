@@ -10,3 +10,5 @@
 #include <algorithm>
 
 #pragma comment(lib, "Ws2_32.lib")
+
+std::mutex mx;
