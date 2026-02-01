@@ -21,7 +21,7 @@ static std::string stripCR(std::string s) {
     return s;
 }
 
-static void recvLoop(SOCKET s, std::atomic<bool>& running) {
+static void receiveMessage(SOCKET s, std::atomic<bool>& running) {
     std::string buf;
     char buff[1048];
 
@@ -35,7 +35,7 @@ static void recvLoop(SOCKET s, std::atomic<bool>& running) {
         buf.append(buff, buff + received);
 
         while(1) {
-            size_t pos = buf.find('\n');
+            int pos = buf.find('\n');
             if (pos == std::string::npos) break;
 
             std::string line = buf.substr(0, pos);
@@ -54,54 +54,15 @@ static void recvLoop(SOCKET s, std::atomic<bool>& running) {
     }
 }
 
-static bool connectTo(const std::string& host, const std::string& portStr, SOCKET& outSock) {
-    addrinfo hints{};
-    hints.ai_family = AF_UNSPEC;   
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_protocol = IPPROTO_TCP;
-
-    addrinfo* result = nullptr;
-    int r = getaddrinfo(host.c_str(), portStr.c_str(), &hints, &result);
-    if (r != 0) {
-        std::cerr << "getaddrinfo failed: " << r << "\n";
-        return false;
-    }
-
-    SOCKET s = INVALID_SOCKET;
-
-    for (addrinfo* ptr = result; ptr != nullptr; ptr = ptr->ai_next) {
-        s = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol);
-        if (s == INVALID_SOCKET) continue;
-
-        if (connect(s, ptr->ai_addr, (int)ptr->ai_addrlen) == SOCKET_ERROR) {
-            closesocket(s);
-            s = INVALID_SOCKET;
-            continue;
-        }
-
-        break;
-    }
-
-    freeaddrinfo(result);
-
-    if (s == INVALID_SOCKET) {
-        std::cerr << "Unable to connect to " << host << ":" << portStr << "\n";
-        return false;
-    }
-
-    outSock = s;
-    return true;
-}
-
 int main(int argc, char** argv) {
-    if (argc != 4) {
-        std::cerr << "Usage: " << argv[0] << " <username> <host> <port>" << std::endl;
+    if (argc != 2) {
+        std::cerr << "Please enter your username: " << argv[0] << " + username" << std::endl;
         return 1;
     }
 
     const std::string username = argv[1];
-    const std::string host = argv[2];
-    const std::string port = argv[3];
+    const char* host = "127.0.0.1";
+    unsigned int port = 65432;
 
     WSADATA wsa{};
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
@@ -109,11 +70,30 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    SOCKET client_socket = INVALID_SOCKET;
-    if (!connectTo(host, port, client_socket)) {
+    SOCKET client_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (client_socket == INVALID_SOCKET) {
+        std::cerr << "Socket creation failed with error: " << WSAGetLastError() << std::endl;
         WSACleanup();
         return 1;
     }
+
+    sockaddr_in server_address = {};
+    server_address.sin_family = AF_INET;
+    server_address.sin_port = htons(port);
+    if (inet_pton(AF_INET, host, &server_address.sin_addr) <= 0) {
+        std::cerr << "Invalid address/ Address not supported" << std::endl;
+        closesocket(client_socket);
+        WSACleanup();
+        return 1;
+    }
+
+    if (connect(client_socket, reinterpret_cast<sockaddr*>(&server_address), sizeof(server_address)) == SOCKET_ERROR) {
+        std::cerr << "Connection failed with error: " << WSAGetLastError() << std::endl;
+        closesocket(client_socket);
+        WSACleanup();
+        return 1;
+    }
+
     if (!sendLine(client_socket, username)) {
         std::cerr << "Failed to send username." << std::endl;
         closesocket(client_socket);
@@ -123,12 +103,13 @@ int main(int argc, char** argv) {
 
     std::atomic<bool> running(true);
 
-    std::thread t(recvLoop, client_socket, std::ref(running));
+    std::thread t(receiveMessage, client_socket, std::ref(running));
+
     std::string line;
     while (running.load() && std::getline(std::cin, line)) {
         if (!sendLine(client_socket, line)) {
             std::lock_guard<std::mutex> lock(mx);
-            std::cerr << "Send failed (server likely closed)." << std::endl;
+            std::cerr << "Message failed to send (server likely closed)." << std::endl;
             running.store(false);
             break;
         }
