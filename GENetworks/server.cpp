@@ -13,7 +13,12 @@ bool sendAll(SOCKET s, const char* data, int len) {
 bool sendLine(SOCKET s, const std::string& line) {
 	std::string out = line;
 	if (out.empty() || out.back() != '\n') out.push_back('\n');
-	return sendAll(s, out.c_str(), out.size());
+	return sendAll(s, out.c_str(), (int)out.size());
+}
+
+std::string stripCR(std::string s) {
+	s.erase(std::remove(s.begin(), s.end(), '\r'), s.end());
+	return s;
 }
 
 std::string removeClient(SOCKET s) {
@@ -87,11 +92,6 @@ bool readText(SOCKET s) {
 		recvBuffers[s].append(buff, buff + received);
 	}
 	return true;
-}
-
-static std::string stripCR(std::string s) {
-	s.erase(std::remove(s.begin(), s.end(), '\r'), s.end());
-	return s;
 }
 
 bool completeLine(SOCKET s, std::string& output) {

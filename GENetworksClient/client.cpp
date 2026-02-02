@@ -1,6 +1,6 @@
 #include "client.h"
 
-static bool sendAll(SOCKET s, const char* data, int len) {
+bool sendAll(SOCKET s, const char* data, int len) {
     int sentSum = 0;
     while (sentSum < len) {
         int sent = send(s, data + sentSum, len - sentSum, 0);
@@ -10,13 +10,13 @@ static bool sendAll(SOCKET s, const char* data, int len) {
     return true;
 }
 
-static bool sendLine(SOCKET s, const std::string& line) {
+bool sendLine(SOCKET s, const std::string& line) {
     std::string out = line;
     if (out.empty() || out.back() != '\n') out.push_back('\n');
     return sendAll(s, out.c_str(), (int)out.size());
 }
 
-static std::string stripCR(std::string s) {
+std::string stripCR(std::string s) {
     s.erase(std::remove(s.begin(), s.end(), '\r'), s.end());
     return s;
 }
