@@ -54,7 +54,7 @@ static void receiveMessage(SOCKET s, std::atomic<bool>& running) {
     }
 }
 
-int main(int argc, char** argv) {
+/*int main(int argc, char** argv) {
     if (argc != 2) {
         std::cerr << "Please enter your username: " << argv[0] << " + username" << std::endl;
         return 1;
@@ -130,3 +130,4 @@ int main(int argc, char** argv) {
     WSACleanup();
     return 0;
 }
+*/

@@ -73,7 +73,7 @@ void broadcast(const std::string& line, SOCKET sender = INVALID_SOCKET) {
 
 std::string clientList() {
 	std::lock_guard<std::mutex> lock(mx);
-	std::string output = "Online: ";
+	std::string output = "Online:";
 	bool first = true;
 	for (auto& client : clients) {
 		output += (first ? " " : ", ");
