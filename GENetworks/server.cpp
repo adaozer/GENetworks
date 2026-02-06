@@ -71,6 +71,32 @@ void broadcast(const std::string& line, SOCKET sender = INVALID_SOCKET) {
 	}
 }
 
+void broadcastAll(const std::string& line) {
+	std::vector<SOCKET> sockets;
+	{
+		std::lock_guard<std::mutex> lock(mx);
+		for (auto& c : clients) {
+			sockets.push_back(c.second);
+		}
+	}
+	for (const auto& s : sockets) {
+		sendLine(s, line);
+	}
+}
+
+void broadcastUsers() {
+	std::string list = "USERS ";
+	{
+		std::lock_guard<std::mutex> lock(mx);
+		bool first = true;
+		for (auto& c : clients) {
+			if (!first) list += ",";
+			list += c.first;
+			first = false;
+		}
+	}
+	broadcastAll(list);
+}
 std::string clientList() {
 	std::lock_guard<std::mutex> lock(mx);
 	std::string output = "Online:";
@@ -153,6 +179,7 @@ void clientAdd(SOCKET client_socket) {
 	}
 
 	sendLine(client_socket, "Welcome " + username + "!");
+	broadcastUsers();
 	broadcast(username + " has joined!", client_socket);
 
 	while (true) {
@@ -160,7 +187,10 @@ void clientAdd(SOCKET client_socket) {
 		while (!completeLine(client_socket, line)) {
 			if (!readText(client_socket)) {
 				std::string u = removeClient(client_socket);
-				if (!u.empty()) broadcast(u + " has left!");
+				if (!u.empty()) {
+					broadcastUsers();
+					broadcast(u + " has left!");
+				}
 				return;
 			}
 		}
@@ -168,7 +198,10 @@ void clientAdd(SOCKET client_socket) {
 
 		if (line == "/leave") {
 			std::string u = removeClient(client_socket);
-			if (!u.empty()) broadcast(u + " has left!");
+			if (!u.empty()) {
+				broadcastUsers();
+				broadcast(u + " has left!");
+			}
 			return;
 		}
 
@@ -206,7 +239,7 @@ void clientAdd(SOCKET client_socket) {
 			sendLine(client_socket, "(DM to " + target + ") " + message);
 			continue;
 		}
-		broadcast(username + ": " + line, client_socket);
+		broadcastAll(username + ": " + line);
 	}
 }
 

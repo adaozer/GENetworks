@@ -3,7 +3,16 @@
 
 #include <algorithm>
 
-// ---------------- Inbound processing ----------------
+#include <cctype>
+
+static inline void trim(std::string& s)
+{
+    auto notSpace = [](unsigned char c) { return !std::isspace(c); };
+    s.erase(s.begin(), std::find_if(s.begin(), s.end(), notSpace));
+    s.erase(std::find_if(s.rbegin(), s.rend(), notSpace).base(), s.end());
+}
+
+
 void ChatUIState::pumpInbound()
 {
     std::queue<std::string> local;
@@ -17,7 +26,6 @@ void ChatUIState::pumpInbound()
         std::string line = std::move(local.front());
         local.pop();
 
-        // USERS list from server
         if (line.rfind("USERS ", 0) == 0)
         {
             users.clear();
@@ -30,7 +38,7 @@ void ChatUIState::pumpInbound()
                 std::string name = (comma == std::string::npos)
                     ? list.substr(start)
                     : list.substr(start, comma - start);
-
+                trim(name);
                 if (!name.empty())
                     users.push_back(name);
 
@@ -45,17 +53,30 @@ void ChatUIState::pumpInbound()
             continue;
         }
 
-        // Private messages
-        if (line.rfind("(DM)", 0) == 0 || line.rfind("(DM to ", 0) == 0)
+        if (line.rfind("(DM) ", 0) == 0)
         {
-            // Just store whole line; simple and robust
-            size_t colon = line.find(':');
-            std::string key = (colon == std::string::npos) ? "DM" : line.substr(0, colon);
-            dmMessages[key].push_back(line);
+            size_t nameStart = 5;
+            size_t colon = line.find(':', nameStart);
+            if (colon != std::string::npos)
+            {
+                std::string from = line.substr(nameStart, colon - nameStart);
+                trim(from);
+                dmMessages[from].push_back(line);
+            }
             continue;
         }
 
-        // Room message
+        if (line.rfind("(DM to ", 0) == 0)
+        {
+            size_t close = line.find(')');
+            if (close != std::string::npos)
+            {
+                std::string to = line.substr(7, close - 7);
+                trim(to);
+                dmMessages[to].push_back(line);
+            }
+            continue;
+        }
         roomMessages.push_back(line);
 
         if (roomMessages.size() > 5000)
@@ -63,7 +84,6 @@ void ChatUIState::pumpInbound()
     }
 }
 
-// ---------------- UI drawing ----------------
 void DrawChatUI(
     ChatUIState& st,
     const std::function<void(const std::string&)>& sendBroadcast,
@@ -71,11 +91,11 @@ void DrawChatUI(
 {
     st.pumpInbound();
 
-    ImGui::SetNextWindowSize(ImVec2(900, 520), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(1100, 650), ImGuiCond_FirstUseEver);
     ImGui::Begin("Chat Client");
 
-    // ---- LEFT: USERS ----
-    ImGui::BeginChild("Users", ImVec2(220, 0), true);
+    float footerHeight = ImGui::GetFrameHeightWithSpacing();
+    ImGui::BeginChild("Users", ImVec2(220, -footerHeight), true);
     ImGui::Text("Active Users");
     ImGui::Separator();
 
@@ -99,16 +119,21 @@ void DrawChatUI(
     ImGui::EndChild();
     ImGui::SameLine();
 
-    // ---- RIGHT: ROOM CHAT ----
     ImGui::BeginChild("Room", ImVec2(0, -ImGui::GetFrameHeightWithSpacing()), true);
+
+    float scrollY = ImGui::GetScrollY();
+    float scrollMaxY = ImGui::GetScrollMaxY();
+    bool wasAtBottom = (scrollY >= scrollMaxY - 5.0f);
 
     for (const auto& msg : st.roomMessages)
         ImGui::TextWrapped("%s", msg.c_str());
 
-    ImGui::SetScrollHereY(1.0f);
+    // Auto-scroll only if we were already at bottom
+    if (wasAtBottom)
+        ImGui::SetScrollHereY(1.0f);
+
     ImGui::EndChild();
 
-    // Input
     ImGui::PushItemWidth(-80);
     bool send = ImGui::InputText(
         "##room",
@@ -128,7 +153,6 @@ void DrawChatUI(
 
     ImGui::End();
 
-    // ---- PRIVATE WINDOW ----
     if (st.dmOpen && st.selectedUser >= 0 && st.selectedUser < (int)st.users.size())
     {
         const std::string& user = st.users[st.selectedUser];
@@ -153,8 +177,9 @@ void DrawChatUI(
 
         if (sendDM && st.dmInput[0])
         {
+            std::string to = user;
+            trim(to);
             sendUnicast(user, st.dmInput);
-            log.push_back("Me: " + std::string(st.dmInput));
             st.dmInput[0] = '\0';
         }
 

@@ -30,6 +30,7 @@ struct ChatUIState
     }
 
     void pumpInbound();
+    bool roomAutoScroll = true;
 };
 
 void DrawChatUI(
