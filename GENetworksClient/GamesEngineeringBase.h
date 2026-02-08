@@ -901,6 +901,9 @@ namespace GamesEngineeringBase
 			HRESULT comResult;
 			comResult = XAudio2Create(&xaudio, 0, XAUDIO2_DEFAULT_PROCESSOR);
 			comResult = xaudio->CreateMasteringVoice(&xaudioMasterVoice);
+			xaudio->CreateMasteringVoice(&xaudioMasterVoice);
+			xaudioMasterVoice->SetVolume(0.3f);
+
 		}
 
 		// Loads a sound effect

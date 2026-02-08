@@ -13,7 +13,7 @@ static inline void trim(std::string& s)
 }
 
 
-void ChatUIState::pumpInbound()
+void ChatUIState::pumpInbound(const std::string& selfName)
 {
     std::queue<std::string> local;
     {
@@ -62,6 +62,10 @@ void ChatUIState::pumpInbound()
                 std::string from = line.substr(nameStartIndex, colon - nameStartIndex);
                 trim(from);
                 dmMessages[from].push_back(line);
+                if (from != selfName) {
+                    std::lock_guard<std::mutex> lock(mx);
+                    soundEvents.push(SoundEvent::DM);
+                }
             }
             continue;
         }
@@ -74,9 +78,24 @@ void ChatUIState::pumpInbound()
                 std::string to = line.substr(7, close - 7);
                 trim(to);
                 dmMessages[to].push_back(line);
+
             }
             continue;
         }
+        size_t colon = line.find(": ");
+        if (colon != std::string::npos)
+        {
+            std::string from = line.substr(0, colon);
+            trim(from);
+
+            if (!from.empty() && from != selfName)
+            {
+                std::lock_guard<std::mutex> lock(mx);
+                soundEvents.push(SoundEvent::Broadcast);
+            }
+        }
+
+
         roomMessages.push_back(line);
 
         if (roomMessages.size() > 5000)
@@ -86,10 +105,11 @@ void ChatUIState::pumpInbound()
 
 void DrawChatUI(
     ChatUIState& st,
+    const std::string& selfName,
     const std::function<void(const std::string&)>& sendBroadcast,
     const std::function<void(const std::string&, const std::string&)>& sendUnicast)
 {
-    st.pumpInbound();
+    st.pumpInbound(selfName);
 
     ImGui::SetNextWindowSize(ImVec2(1100, 650), ImGuiCond_FirstUseEver);
     ImGui::Begin("Chat Client");

@@ -6,10 +6,13 @@
 #include <mutex>
 #include <functional>
 
+enum class SoundEvent { Broadcast, DM };
+
 struct ChatUIState
 {
     std::vector<std::string> users;
     int selectedUser = -1;
+    std::queue<SoundEvent> soundEvents;
 
     std::vector<std::string> roomMessages;
 
@@ -28,13 +31,21 @@ struct ChatUIState
         std::lock_guard<std::mutex> lock(mx);
         inbound.push(std::move(line));
     }
-
-    void pumpInbound();
+    bool popSoundEvent(SoundEvent& out)
+    {
+        std::lock_guard<std::mutex> lock(mx);
+        if (soundEvents.empty()) return false;
+        out = soundEvents.front();
+        soundEvents.pop();
+        return true;
+    }
+    void pumpInbound(const std::string& selfName);
     bool roomAutoScroll = true;
 };
 
 void DrawChatUI(
     ChatUIState& state,
+    const std::string& selfName,
     const std::function<void(const std::string&)>& sendBroadcast,
     const std::function<void(const std::string&, const std::string&)>& sendUnicast
 );

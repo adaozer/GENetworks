@@ -47,11 +47,12 @@ int main(int argc, char* argv[]) {
     if (argc != 2) {
         std::cout << "Please enter a username as an arguement (.\\GENetworksClients.exe <username>)" << std::endl;
     }
-
+    HRESULT hrCom = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool comOk = SUCCEEDED(hrCom) || hrCom == S_FALSE;
     GamesEngineeringBase::SoundManager sm;
     sm.load("broadcast.wav");
     sm.load("unicast.wav");
-
+    
     // Make process DPI aware and obtain main monitor scale
     ImGui_ImplWin32_EnableDpiAwareness();
     float main_scale = ImGui_ImplWin32_GetDpiScaleForMonitor(::MonitorFromPoint(POINT{ 0, 0 }, MONITOR_DEFAULTTOPRIMARY));
@@ -132,6 +133,12 @@ int main(int argc, char* argv[]) {
     bool done = false;
     while (!done)
     {
+        SoundEvent ev;
+        while (chat.popSoundEvent(ev)) {
+            if (ev == SoundEvent::Broadcast) sm.play("broadcast.wav");
+            else if (ev == SoundEvent::DM) sm.play("unicast.wav");
+        }
+
         // Poll and handle messages (inputs, window resize, etc.)
         // See the WndProc() function below for our to dispatch events to the Win32 backend.
         MSG msg;
@@ -168,21 +175,17 @@ int main(int argc, char* argv[]) {
         auto sendBroadcast = [&](const std::string& msg)
             {
                 sendLine(gSock, msg);
-                sm.play("broadcast.wav");
             };
 
         auto sendUnicast = [&](const std::string& to, const std::string& msg)
             {
                 sendLine(gSock, "/msg " + to + " " + msg);
-                sm.play("unicast.wav");
             };
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
 
-        DrawChatUI(chat, sendBroadcast, sendUnicast);
-
-
+        DrawChatUI(chat, argv[1], sendBroadcast, sendUnicast);
         // Rendering
         ImGui::Render();
         const float clear_color_with_alpha[4] = { clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w, clear_color.w };
@@ -209,6 +212,7 @@ int main(int argc, char* argv[]) {
     ::DestroyWindow(hwnd);
     ::UnregisterClassW(wc.lpszClassName, wc.hInstance);
     WSACleanup();
+    if (comOk) CoUninitialize();
     return 0;
 }
 
