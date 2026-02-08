@@ -6,45 +6,35 @@
 #include <mutex>
 #include <functional>
 
-enum class SoundEvent { Broadcast, DM };
+enum class SoundEvent { Broadcast, DM }; // Play a different sound based on if its a DM or a Broadcast
 
-struct ChatUIState
-{
+class GUI {
+public:
     std::vector<std::string> users;
-    int selectedUser = -1;
-    std::queue<SoundEvent> soundEvents;
-
+    std::queue<SoundEvent> sounds;
     std::vector<std::string> roomMessages;
+    std::unordered_map<std::string, std::vector<std::string>> DMs;
 
-    std::unordered_map<std::string, std::vector<std::string>> dmMessages;
-
-    char roomInput[512] = "";
-    char dmInput[512] = "";
+    char roomInput[1024] = "";
+    char dmInput[1024] = "";
 
     bool dmOpen = false;
+    bool roomAutoScroll = true;
+
+    int selectedUser = -1;
 
     std::mutex mx;
-    std::queue<std::string> inbound;
+    std::queue<std::string> incomingMessages;
 
-    void pushInbound(std::string line)
-    {
-        std::lock_guard<std::mutex> lock(mx);
-        inbound.push(std::move(line));
-    }
-    bool popSoundEvent(SoundEvent& out)
-    {
-        std::lock_guard<std::mutex> lock(mx);
-        if (soundEvents.empty()) return false;
-        out = soundEvents.front();
-        soundEvents.pop();
-        return true;
-    }
-    void pumpInbound(const std::string& selfName);
-    bool roomAutoScroll = true;
+    void pushToQueue(std::string line);
+
+    bool popSoundEvent(SoundEvent& out);
+
+    void getMessages(const std::string& self);
 };
 
 void DrawChatUI(
-    ChatUIState& state,
+    GUI& state,
     const std::string& selfName,
     const std::function<void(const std::string&)>& sendBroadcast,
     const std::function<void(const std::string&, const std::string&)>& sendUnicast

@@ -2,9 +2,9 @@
 #include "imgui.h"
 
 #include <algorithm>
-
 #include <cctype>
 
+// Remove empty space
 void trim(std::string& s)
 {
     auto notSpace = [](unsigned char c) { return !std::isspace(c); };
@@ -12,13 +12,24 @@ void trim(std::string& s)
     s.erase(std::find_if(s.rbegin(), s.rend(), notSpace).base(), s.end());
 }
 
+// Pops the sound event from the sound events queue after its played.
+bool GUI::popSoundEvent(SoundEvent& out)
+{
+    std::lock_guard<std::mutex> lock(mx);
+    if (sounds.empty()) return false;
+    out = sounds.front();
+    sounds.pop();
+    return true;
+}
 
-void ChatUIState::pumpInbound(const std::string& selfName)
+// Used to get incoming information and process it onto the GUI.
+// Checks information in messages to see if they're updating the users, DMing, or simply broadcasting.
+void GUI::getMessages(const std::string& self)
 {
     std::queue<std::string> local;
     {
         std::lock_guard<std::mutex> lock(mx);
-        std::swap(local, inbound);
+        std::swap(local, incomingMessages);
     }
 
     while (!local.empty())
@@ -26,7 +37,7 @@ void ChatUIState::pumpInbound(const std::string& selfName)
         std::string line = std::move(local.front());
         local.pop();
 
-        if (line.rfind("USERS ", 0) == 0)
+        if (line.rfind("USERS ", 0) == 0) // This is used to build the clients list on the left side.
         {
             users.clear();
             std::string list = line.substr(6);
@@ -61,13 +72,13 @@ void ChatUIState::pumpInbound(const std::string& selfName)
             {
                 std::string from = line.substr(nameStartIndex, colon - nameStartIndex);
                 trim(from);
-                dmMessages[from].push_back(line);
-                if (from != selfName) {
+                DMs[from].push_back(line);
+                if (from != self) {
                     std::lock_guard<std::mutex> lock(mx);
-                    soundEvents.push(SoundEvent::DM);
+                    sounds.push(SoundEvent::DM);
                 }
             }
-            continue;
+            continue; // DM logic, find sender
         }
 
         if (line.rfind("(DM to ", 0) == 0)
@@ -77,10 +88,10 @@ void ChatUIState::pumpInbound(const std::string& selfName)
             {
                 std::string to = line.substr(7, close - 7);
                 trim(to);
-                dmMessages[to].push_back(line);
+                DMs[to].push_back(line);
 
             }
-            continue;
+            continue; // DM logic, find receiver.
         }
         size_t colon = line.find(": ");
         if (colon != std::string::npos)
@@ -88,28 +99,32 @@ void ChatUIState::pumpInbound(const std::string& selfName)
             std::string from = line.substr(0, colon);
             trim(from);
 
-            if (!from.empty() && from != selfName)
+            if (!from.empty() && from != self)
             {
                 std::lock_guard<std::mutex> lock(mx);
-                soundEvents.push(SoundEvent::Broadcast);
+                sounds.push(SoundEvent::Broadcast);
             }
         }
 
-        roomMessages.push_back(line);
+        roomMessages.push_back(line); // Broadcast messages
 
         if (roomMessages.size() > 5000)
             roomMessages.erase(roomMessages.begin());
     }
 }
 
-void DrawChatUI(
-    ChatUIState& st,
-    const std::string& selfName,
-    const std::function<void(const std::string&)>& sendBroadcast,
-    const std::function<void(const std::string&, const std::string&)>& sendUnicast)
+// Push a message into the queue
+void GUI::pushToQueue(std::string line)
 {
-    st.pumpInbound(selfName);
+    std::lock_guard<std::mutex> lock(mx);
+    incomingMessages.push(std::move(line));
+}
 
+// This draws the whole GUI. Takes the GUI class, the name of the user, and sendBroadcast and sendUnicast functions as args.
+// Builds and draws the whole UI, uses the broadcast and unicast functions to link the client/server code and the GUI.
+void DrawChatUI(GUI& ui, const std::string& username, const std::function<void(const std::string&)>& sendBroadcast, const std::function<void(const std::string&, const std::string&)>& sendUnicast)
+{
+    ui.getMessages(username); // Update GUI state from any newly received network messages
     ImGui::SetNextWindowSize(ImVec2(1100, 650), ImGuiCond_FirstUseEver);
     ImGui::Begin("Chat Client");
 
@@ -118,21 +133,21 @@ void DrawChatUI(
     ImGui::Text("Active Users");
     ImGui::Separator();
 
-    for (int i = 0; i < (int)st.users.size(); i++)
+    for (int i = 0; i < (int)ui.users.size(); i++)
     {
-        bool selected = (st.selectedUser == i);
-        if (ImGui::Selectable(st.users[i].c_str(), selected))
-            st.selectedUser = i;
+        bool selected = (ui.selectedUser == i);
+        if (ImGui::Selectable(ui.users[i].c_str(), selected))
+            ui.selectedUser = i;
 
         if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
-            st.dmOpen = true;
+            ui.dmOpen = true;
     }
 
-    if (st.selectedUser >= 0)
+    if (ui.selectedUser >= 0)
     {
         ImGui::Spacing();
         if (ImGui::Button("Private Message"))
-            st.dmOpen = true;
+            ui.dmOpen = true;
     }
 
     ImGui::EndChild();
@@ -142,9 +157,9 @@ void DrawChatUI(
 
     float scrollY = ImGui::GetScrollY();
     float scrollMaxY = ImGui::GetScrollMaxY();
-    bool wasAtBottom = (scrollY >= scrollMaxY - 5.0f);
+    bool wasAtBottom = (scrollY >= scrollMaxY - 5.0f); // Keep scroll pinned to bottom unless the user has manually scrolled up
 
-    for (const auto& msg : st.roomMessages)
+    for (const auto& msg : ui.roomMessages)
         ImGui::TextWrapped("%s", msg.c_str());
 
     if (wasAtBottom)
@@ -155,30 +170,30 @@ void DrawChatUI(
     ImGui::PushItemWidth(-80);
     bool send = ImGui::InputText(
         "##room",
-        st.roomInput,
-        sizeof(st.roomInput),
+        ui.roomInput,
+        sizeof(ui.roomInput),
         ImGuiInputTextFlags_EnterReturnsTrue);
     ImGui::PopItemWidth();
 
     ImGui::SameLine();
     if (ImGui::Button("Send")) send = true;
 
-    if (send && st.roomInput[0])
+    if (send && ui.roomInput[0])
     {
-        sendBroadcast(st.roomInput);
-        st.roomInput[0] = '\0';
+        sendBroadcast(ui.roomInput);
+        ui.roomInput[0] = '\0';
     }
 
     ImGui::End();
 
-    if (st.dmOpen && st.selectedUser >= 0 && st.selectedUser < (int)st.users.size())
+    if (ui.dmOpen && ui.selectedUser >= 0 && ui.selectedUser < (int)ui.users.size())
     {
-        const std::string& user = st.users[st.selectedUser];
+        const std::string& user = ui.users[ui.selectedUser];
         std::string title = "Private Chat: " + user;
 
-        ImGui::Begin(title.c_str(), &st.dmOpen);
+        ImGui::Begin(title.c_str(), &ui.dmOpen);
 
-        auto& log = st.dmMessages[user];
+        auto& log = ui.DMs[user];
         for (auto& msg : log)
             ImGui::TextWrapped("%s", msg.c_str());
 
@@ -186,19 +201,19 @@ void DrawChatUI(
 
         bool sendDM = ImGui::InputText(
             "##dm",
-            st.dmInput,
-            sizeof(st.dmInput),
+            ui.dmInput,
+            sizeof(ui.dmInput),
             ImGuiInputTextFlags_EnterReturnsTrue);
 
         ImGui::SameLine();
         if (ImGui::Button("Send")) sendDM = true;
 
-        if (sendDM && st.dmInput[0])
+        if (sendDM && ui.dmInput[0])
         {
             std::string to = user;
             trim(to);
-            sendUnicast(user, st.dmInput);
-            st.dmInput[0] = '\0';
+            sendUnicast(user, ui.dmInput);
+            ui.dmInput[0] = '\0';
         }
 
         ImGui::End();

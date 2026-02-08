@@ -1,5 +1,6 @@
 #include "server.h"
-
+// SendAll implementation to make sure all bytes are sent.
+// Takes socket to send to, the data to send and the length of the data as args
 bool sendAll(SOCKET s, const char* data, int len) {
 	int sentSum = 0;
 	while (sentSum < len) {
@@ -9,18 +10,24 @@ bool sendAll(SOCKET s, const char* data, int len) {
 	}
 	return true;
 }
-
+// Add a newline (\n) character to the end of a line
+// Args are socket to send to, line that will be sent
 bool sendLine(SOCKET s, const std::string& line) {
 	std::string out = line;
 	if (out.empty() || out.back() != '\n') out.push_back('\n');
 	return sendAll(s, out.c_str(), (int)out.size());
 }
 
-std::string stripCR(std::string s) {
+// Removes \r character
+// Takes the line as arg
+std::string stripCR(std::string& s) {
 	s.erase(std::remove(s.begin(), s.end(), '\r'), s.end());
 	return s;
 }
 
+// Remove client, takes in socket of the client as arg,
+// erases the client's information from every dictionary, closes the socket and returns username so 
+// it can be broadcasted to the other users that this user left.
 std::string removeClient(SOCKET s) {
 	std::string username;
 	{
@@ -37,6 +44,11 @@ std::string removeClient(SOCKET s) {
 	return username;
 }
 
+// Broadcast function, takes the line to be broadcasted and the socket of the sender as an arg.
+// Parses every socket that isn't the sender's socket and adds them to a list.
+// Calls sendLine to send the message to each socket that is not the sender's socket.
+// SendLine uses sendAll to send every byte.
+// Used for "client has left" or "client has joined" type messages
 void broadcast(const std::string& line, SOCKET sender = INVALID_SOCKET) {
 	std::vector<SOCKET> sockets;
 	{
@@ -71,6 +83,8 @@ void broadcast(const std::string& line, SOCKET sender = INVALID_SOCKET) {
 	}
 }
 
+// Like broadcast but sends it to every user including the sender itself. Used to broadcast a message to the whole server
+// Only takes the line as arg as socket is not required.
 void broadcastAll(const std::string& line) {
 	std::vector<SOCKET> sockets;
 	{
@@ -84,6 +98,8 @@ void broadcastAll(const std::string& line) {
 	}
 }
 
+// Broadcast list of users. Used to construct the users list in the GUI.
+// Parses clients map and broadcasts all the users.
 void broadcastUsers() {
 	std::string list = "USERS ";
 	{
@@ -97,18 +113,9 @@ void broadcastUsers() {
 	}
 	broadcastAll(list);
 }
-std::string clientList() {
-	std::lock_guard<std::mutex> lock(mx);
-	std::string output = "Online:";
-	bool first = true;
-	for (auto& client : clients) {
-		output += (first ? " " : ", ");
-		output += client.first;
-		first = false;
-	}
-	return output;
-}
 
+// For receiving text from a client socket. Its then written into the receive buffer of that client.
+// Takes the client socket as an arg.
 bool readText(SOCKET s) {
 	char buff[1024];
 	int received = recv(s, buff, sizeof(buff), 0);
@@ -120,6 +127,8 @@ bool readText(SOCKET s) {
 	return true;
 }
 
+// Checks if a line inputted to a receive buffer is complete with a \n newline character at the end.
+// Takes the socket that the message is being received from and a reference to the output as arguments.
 bool completeLine(SOCKET s, std::string& output) {
 	std::lock_guard<std::mutex> lock(mx);
 	auto it = recvBuffers.find(s);
@@ -131,10 +140,15 @@ bool completeLine(SOCKET s, std::string& output) {
 
 	output = buf.substr(0, pos);
 	buf.erase(0, pos + 1);
-	output = stripCR(output);
+	stripCR(output);
 	return true;
 }
 
+// Main server functionality. Takes the client socket as an argument after the threading.
+// Receives the username of the client as its first message.
+// Adds the client's username, socket, recvBuffer information to the relevant maps.
+// Listens for messages and sends messages based on commands (broadcast or unicast)
+// Uses the helpers (broadcast, completeline, readtext etc.)
 void clientAdd(SOCKET client_socket) {
 	{
 		std::lock_guard<std::mutex> lock(mx);
@@ -152,10 +166,10 @@ void clientAdd(SOCKET client_socket) {
 			}
 		}
 
-		username = line;
+		username = line; // Receive username
 
 		if (username.empty() || username.size() > 24) {
-			sendLine(client_socket, "Invalid username (has to be 1-24 characters)");
+			sendLine(client_socket, "Invalid username (Should be 1-24 characters).");
 			{
 				std::lock_guard<std::mutex> lock(mx);
 				recvBuffers.erase(client_socket);
@@ -167,7 +181,7 @@ void clientAdd(SOCKET client_socket) {
 		{
 			std::lock_guard<std::mutex> lock(mx);
 			if (clients.find(username) != clients.end()) {
-				sendLine(client_socket, "Username taken.");
+				sendLine(client_socket, "Username already taken.");
 				recvBuffers.erase(client_socket);
 				closesocket(client_socket);
 				return;
@@ -185,7 +199,7 @@ void clientAdd(SOCKET client_socket) {
 	while (true) {
 		std::string line;
 		while (!completeLine(client_socket, line)) {
-			if (!readText(client_socket)) {
+			if (!readText(client_socket)) { // Complete Line and Read text. Gracefully disconnect if they fail.
 				std::string u = removeClient(client_socket);
 				if (!u.empty()) {
 					broadcastUsers();
@@ -202,30 +216,26 @@ void clientAdd(SOCKET client_socket) {
 				broadcastUsers();
 				broadcast(u + " has left!");
 			}
-			return;
+			return; // Remove client and broadcast that they've left
 		}
 
-		if (line == "/who") {
-			sendLine(client_socket, clientList());
-			continue;
-		}
 		if (line.rfind("/msg ", 0) == 0) {
 			std::istringstream iss(line);
 			std::string cmd, target;
 			iss >> cmd >> target;
 			std::string message;
-			std::getline(iss, message);
+			std::getline(iss, message); // Extract message from the DM.
 			if (!message.empty() && message[0] == ' ')
 				message.erase(0, 1);
 			if (target.empty() || message.empty()) {
-				sendLine(client_socket, "Usage: /msg <user> <text>");
+				sendLine(client_socket, "Format: /msg <user> <message>");
 				continue;
 			}
 			if (target == username) {
 				sendLine(client_socket, "You cannot DM yourself.");
 				continue;
 			}
-			SOCKET receiver_socket = INVALID_SOCKET;
+			SOCKET receiver_socket = INVALID_SOCKET; // Extract receiver socket from the DM message.
 			{
 				std::lock_guard<std::mutex> lock(mx);
 				auto it = clients.find(target);
@@ -237,13 +247,14 @@ void clientAdd(SOCKET client_socket) {
 			}
 			sendLine(receiver_socket, "(DM) " + username + ": " + message);
 			sendLine(client_socket, "(DM to " + target + ") " + message);
-			continue;
+			continue; // DMing functionality
 		}
-		broadcastAll(username + ": " + line);
+		broadcastAll(username + ": " + line); // If not DM, simply broadcast message to all (including the user who sent it so they can see it on their screen)
 	}
 }
 
-
+// Main function. Initialises WinSock. Creates a server socket. Binds the socket to an address and port (65432)
+// Listens for connections, starts a thread to ClientAdd on connection.
 int main() {
 	WSADATA wsaData;
 	int iResult;

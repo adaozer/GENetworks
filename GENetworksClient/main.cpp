@@ -32,13 +32,13 @@ void CreateRenderTarget();
 void CleanupRenderTarget();
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-static SOCKET gSock = INVALID_SOCKET;
-static std::atomic<bool> gRunning(false);
-static std::thread gRecvThread;
+static SOCKET sock = INVALID_SOCKET;
+static std::atomic<bool> run(false);
+static std::thread t;
 
 
 int main(int argc, char* argv[]) {
-    WSADATA wsa{};
+    WSADATA wsa{}; // Init Winsock
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
     {
         MessageBoxA(nullptr, "WSAStartup failed", "Error", MB_OK);
@@ -46,12 +46,14 @@ int main(int argc, char* argv[]) {
     }
     if (argc != 2) {
         std::cout << "Please enter a username as an arguement (.\\GENetworksClients.exe <username>)" << std::endl;
-    }
+    } // Get username from args
+
     HRESULT hrCom = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     const bool comOk = SUCCEEDED(hrCom) || hrCom == S_FALSE;
+
     GamesEngineeringBase::SoundManager sm;
     sm.load("broadcast.wav");
-    sm.load("unicast.wav");
+    sm.load("unicast.wav"); // Load the notification sounds into the sound manager.
     
     // Make process DPI aware and obtain main monitor scale
     ImGui_ImplWin32_EnableDpiAwareness();
@@ -117,23 +119,23 @@ int main(int argc, char* argv[]) {
     static char buff[64] = "";
     bool b_button = false;
     float r = 10.f;
-    static ChatUIState chat;
-    if (!connectToServer(gSock, "127.0.0.1", 65432))
+    GUI chat; // Make a GUI instance and connect to server
+    if (!connectToServer(sock, "127.0.0.1", 65432)) // Connect to server
     {
         MessageBoxA(nullptr, "Failed to connect to server", "Error", MB_OK);
         return 1;
     }
 
     // Send username
-    sendLine(gSock, argv[1]);
+    sendLine(sock, argv[1]);
 
     // Start receive thread
-    startReceive(gSock, gRunning, chat, gRecvThread);
+    startReceive(sock, run, chat, t);
     // Main loop
     bool done = false;
     while (!done)
     {
-        SoundEvent ev;
+        SoundEvent ev; // Play sounds
         while (chat.popSoundEvent(ev)) {
             if (ev == SoundEvent::Broadcast) sm.play("broadcast.wav");
             else if (ev == SoundEvent::DM) sm.play("unicast.wav");
@@ -141,6 +143,7 @@ int main(int argc, char* argv[]) {
 
         // Poll and handle messages (inputs, window resize, etc.)
         // See the WndProc() function below for our to dispatch events to the Win32 backend.
+
         MSG msg;
         while (::PeekMessage(&msg, nullptr, 0U, 0U, PM_REMOVE))
         {
@@ -172,21 +175,21 @@ int main(int argc, char* argv[]) {
         // Start the Dear ImGui frame
        
 
-        auto sendBroadcast = [&](const std::string& msg)
+        auto sendBroadcast = [&](const std::string& msg) // Simple broadcast+unicast
             {
-                sendLine(gSock, msg);
+                sendLine(sock, msg); 
             };
 
         auto sendUnicast = [&](const std::string& to, const std::string& msg)
             {
-                sendLine(gSock, "/msg " + to + " " + msg);
+                sendLine(sock, "/msg " + to + " " + msg);
             };
 
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
 
-        DrawChatUI(chat, argv[1], sendBroadcast, sendUnicast);
+        DrawChatUI(chat, argv[1], sendBroadcast, sendUnicast); // 
         // Rendering
         ImGui::Render();
         const float clear_color_with_alpha[4] = { clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w, clear_color.w };
@@ -199,11 +202,12 @@ int main(int argc, char* argv[]) {
         //HRESULT hr = g_pSwapChain->Present(0, 0); // Present without vsync
         g_SwapChainOccluded = (hr == DXGI_STATUS_OCCLUDED);
     }
-    gRunning.store(false);
-    shutdown(gSock, SD_BOTH);
-    closesocket(gSock);
-    if (gRecvThread.joinable())
-        gRecvThread.join();
+    //Shutdowns/free memory and cleanup
+    run.store(false);
+    shutdown(sock, SD_BOTH);
+    closesocket(sock);
+    if (t.joinable())
+        t.join();
 
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
