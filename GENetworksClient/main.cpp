@@ -13,7 +13,7 @@
 #include <d3d11.h>
 #include <tchar.h>
 #include "gui.h"
-
+#include "GamesEngineeringBase.h"
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3dcompiler.lib")
@@ -31,17 +31,26 @@ void CleanupDeviceD3D();
 void CreateRenderTarget();
 void CleanupRenderTarget();
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
 static SOCKET gSock = INVALID_SOCKET;
 static std::atomic<bool> gRunning(false);
 static std::thread gRecvThread;
-int main(int argc, char* argv[])
-{
+
+
+int main(int argc, char* argv[]) {
     WSADATA wsa{};
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
     {
         MessageBoxA(nullptr, "WSAStartup failed", "Error", MB_OK);
         return 1;
     }
+    if (argc != 2) {
+        std::cout << "Please enter a username as an arguement (.\\GENetworksClients.exe <username>)" << std::endl;
+    }
+
+    GamesEngineeringBase::SoundManager sm;
+    sm.load("broadcast.wav");
+    sm.load("unicast.wav");
 
     // Make process DPI aware and obtain main monitor scale
     ImGui_ImplWin32_EnableDpiAwareness();
@@ -159,11 +168,13 @@ int main(int argc, char* argv[])
         auto sendBroadcast = [&](const std::string& msg)
             {
                 sendLine(gSock, msg);
+                sm.play("broadcast.wav");
             };
 
         auto sendUnicast = [&](const std::string& to, const std::string& msg)
             {
                 sendLine(gSock, "/msg " + to + " " + msg);
+                sm.play("unicast.wav");
             };
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();
@@ -189,7 +200,7 @@ int main(int argc, char* argv[])
     closesocket(gSock);
     if (gRecvThread.joinable())
         gRecvThread.join();
-    // Cleanup
+
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();

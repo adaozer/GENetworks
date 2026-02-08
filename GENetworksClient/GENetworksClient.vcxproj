@@ -143,6 +143,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="client.h" />
+    <ClInclude Include="GamesEngineeringBase.h" />
     <ClInclude Include="gui.h" />
     <ClInclude Include="imconfig.h" />
     <ClInclude Include="imgui.h" />

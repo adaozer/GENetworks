@@ -55,11 +55,11 @@ void ChatUIState::pumpInbound()
 
         if (line.rfind("(DM) ", 0) == 0)
         {
-            size_t nameStart = 5;
-            size_t colon = line.find(':', nameStart);
+            size_t nameStartIndex = 5;
+            size_t colon = line.find(':', nameStartIndex);
             if (colon != std::string::npos)
             {
-                std::string from = line.substr(nameStart, colon - nameStart);
+                std::string from = line.substr(nameStartIndex, colon - nameStartIndex);
                 trim(from);
                 dmMessages[from].push_back(line);
             }

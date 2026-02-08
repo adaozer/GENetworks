@@ -77,5 +77,8 @@
     <ClInclude Include="gui.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="GamesEngineeringBase.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
