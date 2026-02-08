@@ -5,7 +5,7 @@
 
 #include <cctype>
 
-static inline void trim(std::string& s)
+void trim(std::string& s)
 {
     auto notSpace = [](unsigned char c) { return !std::isspace(c); };
     s.erase(s.begin(), std::find_if(s.begin(), s.end(), notSpace));
@@ -95,7 +95,6 @@ void ChatUIState::pumpInbound(const std::string& selfName)
             }
         }
 
-
         roomMessages.push_back(line);
 
         if (roomMessages.size() > 5000)
@@ -148,7 +147,6 @@ void DrawChatUI(
     for (const auto& msg : st.roomMessages)
         ImGui::TextWrapped("%s", msg.c_str());
 
-    // Auto-scroll only if we were already at bottom
     if (wasAtBottom)
         ImGui::SetScrollHereY(1.0f);
 

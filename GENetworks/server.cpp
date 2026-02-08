@@ -155,7 +155,7 @@ void clientAdd(SOCKET client_socket) {
 		username = line;
 
 		if (username.empty() || username.size() > 24) {
-			sendLine(client_socket, "ERR invalid username (1-24 chars).");
+			sendLine(client_socket, "Invalid username (has to be 1-24 characters)");
 			{
 				std::lock_guard<std::mutex> lock(mx);
 				recvBuffers.erase(client_socket);
@@ -167,7 +167,7 @@ void clientAdd(SOCKET client_socket) {
 		{
 			std::lock_guard<std::mutex> lock(mx);
 			if (clients.find(username) != clients.end()) {
-				sendLine(client_socket, "ERR username taken.");
+				sendLine(client_socket, "Username taken.");
 				recvBuffers.erase(client_socket);
 				closesocket(client_socket);
 				return;
@@ -218,11 +218,11 @@ void clientAdd(SOCKET client_socket) {
 			if (!message.empty() && message[0] == ' ')
 				message.erase(0, 1);
 			if (target.empty() || message.empty()) {
-				sendLine(client_socket, "ERR usage: /msg <user> <text>");
+				sendLine(client_socket, "Usage: /msg <user> <text>");
 				continue;
 			}
 			if (target == username) {
-				sendLine(client_socket, "ERR you cannot DM yourself.");
+				sendLine(client_socket, "You cannot DM yourself.");
 				continue;
 			}
 			SOCKET receiver_socket = INVALID_SOCKET;
@@ -232,7 +232,7 @@ void clientAdd(SOCKET client_socket) {
 				if (it != clients.end()) receiver_socket = it->second;
 			}
 			if (receiver_socket == INVALID_SOCKET) {
-				sendLine(client_socket, "ERR user not found: " + target);
+				sendLine(client_socket, "User not found: " + target);
 				continue;
 			}
 			sendLine(receiver_socket, "(DM) " + username + ": " + message);

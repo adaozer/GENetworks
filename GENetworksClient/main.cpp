@@ -181,6 +181,7 @@ int main(int argc, char* argv[]) {
             {
                 sendLine(gSock, "/msg " + to + " " + msg);
             };
+
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
